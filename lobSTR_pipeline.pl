@@ -8,15 +8,18 @@ use Cwd;
 use FindBin qw($Bin);
 use lib "$Bin/lib";
 use AnaMethod;
-
-my ($input, $build_index,$method, $outdir, $move, $monitorOption, $help, $qsubMemory, $pymonitor);
+use Data::Dumper;
+my ($input, $build_index,$allelotype_arg,$noise_model,$filter,$outdir,$env, $move, $monitorOption, $help, $qsubMemory, $pymonitor);
 
 GetOptions(
-	"input:s" => \$i,
-	"build_index"=>\$build_index,
+	"input:s" => \$input,
+	"build_index:s"=>\$build_index,
 	"outdir:s" => \$outdir,
 	"move:s" => \$move,
-	"method" => \$method,
+	"allelotype:s" => \$allelotype_arg,
+	"noise_model:s" =>\$noise_model,
+	"env:s"=>\$env,
+	"filter:s"=>\$filter,
 	"m:s" => \$monitorOption,
 	"help|?" => \$help,
 	"qsubMemory:s" => \$qsubMemory,
@@ -31,24 +34,33 @@ version :beta.1
 date: 2017-08-15
 usage: perl $0 [options]
 	Common options:
-	-input*		<str>	allsample bam file list. format:sample_name bam
-	-outdir		<str>	outdir.[./]
+	-input*	<str>	allsample bam file list. format:sample_name bam
+	-outdir	<str>	outdir.[./]
+	-allelotype	<str>	allelotype_arg default["--command classify --filter-mapq0 --filter-clipped --max-repeats-in-ends 3 --min-read-end-match 10"]
+	-noise_model	<str>	default[\$Bin/share/lobSTR/models/illumina_v3.pcrfree]
+	-filter	<str>	default["--loc-cov 5 --loc-log-score 0.8 --loc-call-rate 0.8 --call-cov 5 --call-log-score 0.8"]
+	-env	<str> 
 	-build_index	<str>	ref.fa
-	-move		<str>	if this parameter is set,final result will be moved to it from output dir.
-	-m		<str>	monitor options. will create monitor shell while defined this option
-	-qsubMemory	<str>	"25G,10G,5G,1G"
-	-help|?			print help information
+	-move	<str>	if this parameter is set,final result will be moved to it from output dir.
+	-m	<str>	monitor options. will create monitor shell while defined this option["taskmonitor -P common -p meekat_test  -q bc.q"]
+	-qsubMemory <str>	"25G,10G,5G,1G"
+	-help|?	print help information
 
 	Software options:
 	-pymonitor	<str>	monitor path [\$Bin/bin/monitor]
-	
+
 e.g.:
-	perl $0 -i bam.list  -outdir ./outdir
+	perl $0 -input bam.list  -outdir ./outdir
 USE
-die $usage unless ($i && $sample_pair && $outdir);
+die $usage unless ($input && $outdir);
 mkpath($outdir);
 $outdir = File::Spec->rel2abs($outdir);
 
+$noise_model ||="$Bin/share/lobSTR/models/illumina_v3.pcrfree";
+$allelotype_arg ||="--command classify --filter-mapq0 --filter-clipped --max-repeats-in-ends 3 --min-read-end-match 10";
+$filter ||="--loc-cov 5 --loc-log-score 0.8 --loc-call-rate 0.8 --call-cov 5 --call-log-score 0.8";
+
+$monitorOption ||="taskmonitor -P common -p lobSTR  -q bc.q";
 $qsubMemory ||= "25G,5G,5G,1G";
 my @qsubMemory = split /,/,$qsubMemory;
 $qsubMemory[0] ||= "25G";
@@ -59,123 +71,64 @@ $pymonitor ||= "$Bin/bin/monitor";
 my ($shell, $process, $list)=("$outdir/shell/", "$outdir/process/", "$outdir/list");
 mkpath($shell);mkpath($process);mkpath($list);
 
+$env ||=" ";
 
-
-my ($sample,$bam,$dependent) = &ReadInfo2($input);
-my %sample = %$sample;
+my ($bam,$dependent) = &ReadInfo2($input);
 my %bam = %$bam;
 my %dependent = %$dependent;
-
+#print Dumper %bam;
+#die;
 my $dependence = "$list/dependence.txt";
 open TXT, ">$dependence" or die $!;
 
 ###step1 build_index
-foreach my $sample (keys %sample) {
+foreach my $sample (keys %bam) {
+	my $shell_t="$shell/$sample";
+	my $process_t="$process/$sample";
+	my $list_t="$list/$sample";
+	mkpath($shell_t);mkpath($process_t);mkpath($list_t);
 	my $content="$env";
-	if ($build_index) {
-		$content .="";
-		if (defined $dependent{$sample}) {
-		
+	
+	my $build_index_sh="$shell/build_index.sh";
+	my $lobSTR_sh="$shell_t/lobSTR.sh";
+	if (defined $dependent{$sample}) {
+		if (defined $build_index) {
+			
+			$content .="";
+			AnaMethod::generateShell($build_index_sh,$content);
+			print TXT "$dependent{$sample}\t$build_index_sh:$qsubMemory[2]\n";
+			print TXT "$build_index_sh:$qsubMemory[2]\t$lobSTR_sh:$qsubMemory[2]\n";
+		}else{
+			print TXT "$dependent{$sample}\t$lobSTR_sh:$qsubMemory[2]\n";
 		}
+		 
+	}else{
+		print TXT "$lobSTR_sh:$qsubMemory[2]\n";
+	}
+	
+	$content="$env\n";
+	$content .="###allelotype\n";
+	$content .="$Bin/bin/allelotype $allelotype_arg \\\n";   #allelotype arg
+	$content .="--bam $bam{$sample} \\\n";
+	$content .="--noise_model $noise_model \\\n";
+	$content .="--out $process_t/$sample.STR \\\n";
+	$content .="--strinfo $Bin/DB/database/GRCh38.p10.info.tab \\\n";
+	$content .="--index-prefix  $Bin/DB/database/GRCh38.p10.ref/lobSTR_\n";
+	$content .="###filter_vcf\n";
+	$content .="python $Bin/share/lobSTR/scripts/lobSTR_filter_vcf.py --vcf $process_t/$sample.STR.vcf $filter > $process_t/$sample.STR.mark.vcf\n";
+	$content .="perl -lane \'print if /^#/; print if /PASS.+PASS/\'   $process_t/$sample.STR.mark.vcf > $process_t/$sample.STR.filter.vcf\n";
+	AnaMethod::generateShell($lobSTR_sh,$content);
+	if (defined $dependent{$sample}) {
+		print TXT "$dependent{$sample}\t$build_index_sh:$qsubMemory[2]\n";
 	}
 }
 
-
-
-my $pre_process = "$shell/pre_process_$sn.sh";
-my $meerkat_c="$shell/meerkat_$sn.sh";
-my $content="$env";
-$content .="ln -s $normal $process/$sn/ && \\\n";
-$content .="ln -s $normal.bai $process/$sn/ && \\\n";
-$content .="ln -s $tumor $process/$sn/ && \\\n";
-$content .="ln -s $tumor.bai $process/$sn/ &&\\\n";
-$normal="$process/$sn/$normal_basename";
-$tumor="$process/$sn/$tumor_basename";
-$normal =~ s/.bam//g;
-$tumor =~ s/.bam//g;
-$content .="perl $meerkat/pre_process.pl -t 4 -s 20 -k 1500 -q 15 -b $normal.bam -I $hg19_bioDB/hg19.fasta -A $hg19_bioDB/hg19.fasta.fai -W $bwa -S $samtools && \\\n";
-$content .="perl $meerkat/pre_process.pl -t 4 -s 20 -k 1500 -q 15 -b $tumor.bam -I $hg19_bioDB/hg19.fasta -A $hg19_bioDB/hg19.fasta.fai -W $bwa -S $samtools";
-AnaMethod::generateShell($pre_process,$content);
-print TXT "$pre_process:$qsubMemory[2]\t$meerkat_c:$qsubMemory[2]\n";
-
-###step2 meerkat
-my $mechanism="$shell/mechanism_$sn.sh";
-
-$content="$env ";
-$content .= "mv $tumor.blacklist.gz $tumor.blacklist.real.gz &&\\\n";
-$content .= "ln $normal.blacklist.gz $tumor.blacklist.gz &&\\\n";
-
-$content .= "perl $meerkat/meerkat.pl -s 20 -p 3 -o 1 -Q 10 -d 5 -t 8 -b $normal.bam -F $hg19_bioDB -W $bwa -S $samtools -B $blast &&\\\n";
-$content .= "perl $meerkat/meerkat.pl -s 20 -p 3 -o 1 -Q 10 -d 5 -t 8 -b $tumor.bam -F $hg19_bioDB -W $bwa -S $samtools -B $blast ";
-AnaMethod::generateShell($meerkat_c,$content);
-print TXT "$meerkat_c:$qsubMemory[2]\t$mechanism:$qsubMemory[2]\n";
-
-###step 3 mechanism
-my $somatic_calling="$shell/somatic_calling_$sn.sh";
-$content  ="$env ";
-$content .= "perl $meerkat/mechanism.pl -b $normal.bam -R $meerkat_DB/hg19_rmsk.txt && \\\n";
-$content .= "perl $meerkat/mechanism.pl -b $tumor.bam -R $meerkat_DB/hg19_rmsk.txt ";
-AnaMethod::generateShell($mechanism,$content);
-print TXT "$mechanism:$qsubMemory[2]\t$somatic_calling:$qsubMemory[2]\n";
-
-###step4 somatic_calling
-my $somatica="$tumor.somatica.variants";
-my $somaticb="$tumor.somaticb.variants";
-my $somaticc="$tumor.somaticc.variants";
-my $somaticd="$tumor.somaticd.variants";
-my $somatice="$tumor.somatice.variants";
-my $somaticf="$tumor.somaticf.variants";
-my $somaticg="$tumor.somaticg.variants";
-
-my $germline_calling="$shell/germline_calling_$sn.sh";
-$content ="$env ";
-$content .= "perl $meerkat/somatic_sv.pl -i $tumor.variants -o $somatica -R $meerkat_DB/hg19_rmsk.txt -F re_try/ -l 1000 && \\\n";
-$content .= "perl $meerkat/somatic_sv.pl -i $somatica -o $somaticb -R $meerkat_DB/hg19_rmsk.txt -n 1 -B $normal.bam -I $normal.isinfo  -D 5 -Q 10  -y 6 && \\\n";
-$content .= "perl $meerkat/somatic_sv.pl -i $somaticb -o $somaticc -R $meerkat_DB/hg19_rmsk.txt -u 1 -B $normal.bam -Q 10 -S $samtools && \\\n";
-$content .= "perl $meerkat/somatic_sv.pl -i $somaticc -o $somaticd -R $meerkat_DB/hg19_rmsk.txt -f 1 -B $normal.bam -Q 10 -S $samtools && \\\n";
-$content .= "perl $meerkat/somatic_sv.pl -i $somaticd -o $somatice -R $meerkat_DB/hg19_rmsk.txt -e 1 -B $tumor.bam -I $tumor.isinfo -D 5 -Q 10 -S $samtools&& \\\n";
-$content .= "perl $meerkat/somatic_sv.pl -i $somatice -o $somaticf -R $meerkat_DB/hg19_rmsk.txt -z 1 -S $samtools && \\\n";
-$content .= "perl $meerkat/somatic_sv.pl -i $somaticf -o $somaticg -R $meerkat_DB/hg19_rmsk.txt -d 40 -t 20 -S $samtools";
-AnaMethod::generateShell($somatic_calling,$content);
-print TXT "$somatic_calling:$qsubMemory[2]\t$germline_calling:$qsubMemory[2]\n";
-
-
-###step 5 germline_calling
-
-my $germa="$normal.germa.variants";
-my $germb="$normal.germb.variants";
-my $germc="$normal.germc.variants";
-my $germd="$normal.germd.variants";
-my $germe="$normal.germe.variants";
-
-my $annotation="$shell/annotation_$sn.sh";
-$content ="$env ";
-$content .= "perl $meerkat/somatic_sv.pl -i $normal.variants -o $germa -R $meerkat_DB/hg19_rmsk.txt -E 0 && \\\n";
-$content .= "perl $meerkat/somatic_sv.pl -i $germa -o $germb -R $meerkat_DB/hg19_rmsk.txt -E 0 -e 1 -B $normal.bam -I $normal.isinfo  && \\\n";
-$content .= "perl $meerkat/somatic_sv.pl -i $germb -o $germc -R $meerkat_DB/hg19_rmsk.txt -E 0 -u 1 -B $normal.bam && \\\n";
-$content .= "perl $meerkat/somatic_sv.pl -i $germc -o $germd -R $meerkat_DB/hg19_rmsk.txt -E 0 -d 40 -t 40 && \\\n";
-$content .= "perl $meerkat/somatic_sv.pl -i $germd -o $germe -R $meerkat_DB/hg19_rmsk.txt -E 0 -z 1 -p 5 -P 10 ";
-AnaMethod::generateShell($germline_calling,$content);
-print TXT "$germline_calling:$qsubMemory[2]\t$annotation:$qsubMemory[3]\n";
-
-###step 6 annotation
-$content ="$env ";
-$content .= "perl $meerkat/fusions.pl -i $somaticg -G  $meerkat_DB/hg19_refGene.sorted.txt";
-AnaMethod::generateShell($annotation,$content);
-
-	
-}
 close TXT;
-close I;
 if(defined $pymonitor && defined $monitorOption){
-	`echo "$pymonitor $monitorOption -i $dependence " >$list/${method}_qsub.sh`;
+	`echo "$pymonitor $monitorOption -i $dependence " >$list/lobSTR_qsub.sh`;
 }
 
-sub mkpath
-{
-	my $dir=@_;
-	system "mkdir  -p $dir" if  !-d $dir;
-}
+
 
 sub ABSOLUTE_DIR
 #$pavfile=&ABSOLUTE_DIR($pavfile);
@@ -198,27 +151,26 @@ sub ABSOLUTE_DIR
 	return $return;
 }
 
-sub ReadSampleInfo {
+sub ReadInfo2 {
         my ($file) = @_;
-        my (%hashSample,%hashbam,%hashDepend);
+        my (%hashbam,%hashDepend);
         open IN, "$file" or die $!;
         while (<IN>) {
                 chomp;
                 next if(/^\s*$/);
                 s/\s*$//;
                 s/^\s*//;
-                my @tmp = split /\t+/;
-                $hashSample{$tmp[0]}=$tmp[1];
-				$hashbam{$tmp[0]}=$tmp[2];
-                $hashDepend{$tmp[0]}=$tmp[3] if(@tmp >= 4);
+                my @tmp = split;
+				$hashbam{$tmp[0]}=$tmp[1];
+                $hashDepend{$tmp[0]}=$tmp[2] if(@tmp >= 3);
         }
         close IN;
-        return (\%hashSample,\%hashbam,\%hashDepend);
+        return (\%hashbam,\%hashDepend);
 }
 
 sub Readpair2 {
         my ($file) = @_;
-        my ($control,$treatment,%pair,%C,%T);
+        my ($control,$treatment,%pair,%C,%T,%T_N);
         open IN, "$file" or die $!;
         while (<IN>) {
                 next if(/^\s*$/);
@@ -230,7 +182,7 @@ sub Readpair2 {
                         $control = $1;
                         $treatment = $2;
                 }
-                $T_N{$treatment}=control;
+                $T_N{$treatment}=$control;
         }
         close IN;
         return (%T_N);
