@@ -86,7 +86,7 @@ foreach my $sample (keys %bam) {
 	my $shell_t="$shell/$sample";
 	my $process_t="$process/$sample";
 	#my $list_t="$list/$sample";
-	mkpath($shell_t);mkpath($process_t);mkpath($list_t);
+	mkpath($shell_t);mkpath($process_t);#mkpath($list_t);
 	my $content="$env";
 	
 	my $build_index_sh="$shell/build_index.sh";
