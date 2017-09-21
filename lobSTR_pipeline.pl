@@ -116,7 +116,7 @@ foreach my $sample (keys %bam) {
 	$content .="--index-prefix  $Bin/DB/database/GRCh38.p10.ref/lobSTR_\n";
 	$content .="###filter_vcf\n";
 	$content .="python $Bin/share/lobSTR/scripts/lobSTR_filter_vcf.py --vcf $process_t/$sample.STR.vcf $filter > $process_t/$sample.STR.mark.vcf\n";
-	$content .="perl -lane \'print if /^#/; print if /PASS.+PASS/\'   $process_t/$sample.STR.mark.vcf > $process_t/$sample.STR.filter.vcf\n";
+	$content .="perl -lane \'print if /^#/; print if /PASS.+PASS/\'   $process_t/$sample.STR.mark.vcf > $process_t/$sample.STR.filter.vcf ";
 	AnaMethod::generateShell($lobSTR_sh,$content);
 	if (defined $dependent{$sample}) {
 		print TXT "$dependent{$sample}\t$build_index_sh:$qsubMemory[2]\n";
