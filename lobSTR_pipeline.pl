@@ -120,8 +120,6 @@ foreach my $sample (keys %bam) {
 	$content .="--strinfo $Bin/DB/database/GRCh38.p10.info.tab \\\n";
 	$content .="--index-prefix  $Bin/DB/database/GRCh38.p10.ref/lobSTR_\n";
 	$content .="if [ \$? -ne 0 ];then  echo ERRO:callstr ;exit 127 ;fi\n";
-
-
 	$content .="vcf-sort -c $process_t/$sample.STR.vcf -t $process_t/tmp > $process_t/$sample.STR.sort.vcf \n";
 	$content .="if [ \$? -ne 0 ];then  echo ERRO:vcf-sort ;exit 127 ;fi\n";
 	$content .="mv $process_t/$sample.STR.sort.vcf  $process_t/$sample.STR.vcf  \n";
@@ -129,11 +127,16 @@ foreach my $sample (keys %bam) {
 
 	$content .="###filter_vcf\n";
 	$content .="python $Bin/share/lobSTR/scripts/lobSTR_filter_vcf.py --vcf $process_t/$sample.STR.vcf $filter > $process_t/$sample.STR.mark.vcf\n";
+	$content .="if [ \$? -ne 0 ];then  echo ERRO:maker_vcf ;exit 127 ;fi\n";
 	$content .="perl -lane \'print if /^#/; print if /PASS.+PASS/\'   $process_t/$sample.STR.mark.vcf > $process_t/$sample.STR.filter.vcf \n";
-	$content .="perl -lane \'if (/^#/){print; next};next if \$F[4] eq \".\";print if \$F[3] ne \$F[4] \'$process_t/$sample.STR.filter.vcf  > $process_t/$sample.STR.filter.final.vcf\n";
+	$content .="if [ \$? -ne 0 ];then  echo ERRO:filter_vcf ;exit 127 ;fi\n";
+	$content .="perl -lane \'if (/^#/){print; next};next if \$F[4] eq \".\";print if \$F[3] ne \$F[4] \' $process_t/$sample.STR.filter.vcf  > $process_t/$sample.STR.filter.final.vcf\n";
+	$content .="if [ \$? -ne 0 ];then  echo ERRO:filter_alt ;exit 127 ;fi\n";
 	$content .="###zbgip and tabxi\n";
 	$content .="bgzip $process_t/$sample.STR.vcf && tabix $process_t/$sample.STR.vcf.gz \n";
-	$content .="bgzip $process_t/$sample.STR.mark.vcf && tabix $process_t/$sample.STR.mark.vcf.gz";
+	$content .="if [ \$? -ne 0 ];then  echo ERRO:bgzip and tabix $process_t/$sample.STR.vcf ;exit 127 ;fi\n";
+	$content .="bgzip $process_t/$sample.STR.mark.vcf && tabix $process_t/$sample.STR.mark.vcf.gz\n";
+	$content .="if [ \$? -ne 0 ];then  echo ERRO:bgzip and tabix $process_t/$sample.STR.mark.vcf ;exit 127 ;fi";
 
 
 	
