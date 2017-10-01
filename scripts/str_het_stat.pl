@@ -38,11 +38,11 @@ $outdir ||="./";
 $outdir = File::Spec->rel2abs($outdir);
 $vcf = File::Spec->rel2abs($vcf);
 
-
+my %tran=("1"=>"Mon", "2"=>"Di","3"=>"Tri","4"=>"Tetra","5"=>"Penta","6"=>"Hexa");
 #stat noncoding and coding 
 open IN, "$vcf" or die;
 my@sam;
-my %str;my %strlen;
+my %str;my %strlen;my %modulo;
 while (<IN>) {
 	chomp;
 	next if/^##/;
@@ -76,6 +76,13 @@ while (<IN>) {
 				push @{$strlen{$sam[$i]}{'Het.noref/noref'}},($allelotype_len[$GT[0]],$allelotype_len[$GT[1]]);         
 			}
 		}
+		next if $motif_len==1;
+		for (my $j=0;$j<@GT ;$j++) {
+			next if $GT[$j]==0;                                                        ###just stat mutation
+			my $modulo_t=abs(($allelotype_len[$GT[$j]]-$allelotype_len[0])%$motif_len);
+			$modulo{$sam[$i]}{$motif_len}{$modulo_t} ||=0;
+			$modulo{$sam[$i]}{$motif_len}{$modulo_t} ++;
+		}
 	}
 }
 close IN;
@@ -87,18 +94,24 @@ for (my $i=0;$i<@sam;$i++) {
 		foreach my $motif_len (sort keys %{$str{$sam[$i]}}) {
 			my $totalcategory=$str{$sam[$i]}{$motif_len}{'Hom.ref'}+$str{$sam[$i]}{$motif_len}{'Hom.noref'}+$str{$sam[$i]}{$motif_len}{'Het.ref/noref'}+$str{$sam[$i]}{$motif_len}{'Het.noref/noref'};
 			print OUT "$motif_len\tHom.ref\t",$str{$sam[$i]}{$motif_len}{'Hom.ref'}/$totalcategory,"\n";
-			print OUT "$motif_len\tHom.noref\t",$str{$sam[$i]}{$motif_len}{'Hom.noref'}/$totalcategory,"\n";
 			print OUT "$motif_len\tHet.ref/noref\t",$str{$sam[$i]}{$motif_len}{'Het.ref/noref'}/$totalcategory,"\n";
+			print OUT "$motif_len\tHom.noref\t",$str{$sam[$i]}{$motif_len}{'Hom.noref'}/$totalcategory,"\n";
 			print OUT "$motif_len\tHet.noref/noref\t",$str{$sam[$i]}{$motif_len}{'Het.noref/noref'}/$totalcategory,"\n";
 	}
 	close OUT;
 	open CAT, ">$outdir/$sam[$i].str.category.stat" or die;
 	print CAT (map "Hom.ref\t".$_."\n",@{$strlen{$sam[$i]}{'Hom.ref'}});
-	print CAT (map "Hom.noref\t".$_."\n", @{$strlen{$sam[$i]}{'Hom.noref'}});
 	print CAT (map "Het.ref/noref\t".$_."\n",@{$strlen{$sam[$i]}{'Het.ref/noref'}});
+	print CAT (map "Hom.noref\t".$_."\n", @{$strlen{$sam[$i]}{'Hom.noref'}});
 	print CAT (map "Het.noref/noref\t".$_."\n",@{$strlen{$sam[$i]}{'Het.noref/noref'}});
 	close CAT;
-
+	open MO, ">$outdir/$sam[$i].str.modulo.stat" or die;
+	foreach my $motif_len (sort keys %{$modulo{$sam[$i]}}) {
+		foreach my $modulo_t (sort keys %{$modulo{$sam[$i]}{$motif_len}}) {
+			print MO "$tran{$motif_len}\t$modulo_t\t$modulo{$sam[$i]}{$motif_len}{$modulo_t}\n";
+		}
+	}
+	close MO;
 }
 
 
@@ -109,6 +122,9 @@ for (my $i=0;$i<@sam;$i++) {
 	print "$cmd\n";
 	system($cmd);
 	$cmd="export R_LIBS=$Bin/../lib/R_LIBS:\$R_LIBS  && Rscript $Bin/oneFactorBox.r --infile $outdir/$sam[$i].str.category.stat --outfile $outdir/$sam[$i].str.category.png --value.col 2 --x.col 1 --x.lab \"STR category\" --y.lab \"Total STR Length(bp)\" --title.lab \" \" --filter 100";
+	print "$cmd\n";
+	system($cmd);
+	$cmd="export R_LIBS=$Bin/../lib/R_LIBS:\$R_LIBS  && Rscript $Bin/multiLevelLines.r --infile $outdir/$sam[$i].str.modulo.stat --outfile $outdir/$sam[$i].str.modulo.png --group.col 1 --x.col 2 --y.col 3 --group.lab \"STR motif\" --x.lab \"STR length modulo period(bp)\" --y.lab \"STR Loci\" --title.lab \" \" --height 3000 --width 4000  --ylog";
 	print "$cmd\n";
 	system($cmd);
 }

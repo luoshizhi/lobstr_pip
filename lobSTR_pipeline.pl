@@ -37,7 +37,7 @@ usage: perl $0 [options]
 	-input*	<str>	allsample bam file list. format:sample_name bam
 	-outdir	<str>	outdir.[./]
 	-allelotype	<str>	allelotype_arg default["--command classify --filter-mapq0 --filter-clipped --max-repeats-in-ends 3 --min-read-end-match 10"]
-	-noise_model	<str>	default[\$Bin/share/lobSTR/models/illumina_v3.pcrfree]
+	-noise_model	<str>	default[\$Bin/share/lobSTR/models/v3.pcrfree]
 	-filter	<str>	default["--loc-cov 5 --loc-log-score 0.8 --loc-call-rate 0.8 --call-cov 5 --call-log-score 0.8"]
 	-env	<str> 
 	-build_index	<str>	ref.fa
@@ -57,7 +57,7 @@ mkpath($outdir);
 $outdir = File::Spec->rel2abs($outdir);
 
 $noise_model ||="$Bin/share/lobSTR/models/illumina_v3.pcrfree";
-$allelotype_arg ||="--command classify --filter-mapq0 --filter-clipped --max-repeats-in-ends 3 --min-read-end-match 10";
+$allelotype_arg ||="--command classify --min-het-freq 0.2 --filter-mapq0 --filter-clipped --max-repeats-in-ends 3 --min-read-end-match 10";
 $filter ||="--loc-cov 5 --loc-log-score 0.8 --loc-call-rate 0.8 --call-cov 5 --call-log-score 0.8";
 
 $monitorOption ||="taskmonitor -P common -p lobSTR  -q bc.q";
@@ -114,9 +114,11 @@ foreach my $sample (keys %bam) {
 	$content .="--out $process_t/$sample.STR \\\n";
 	$content .="--strinfo $Bin/DB/database/GRCh38.p10.info.tab \\\n";
 	$content .="--index-prefix  $Bin/DB/database/GRCh38.p10.ref/lobSTR_\n";
+	$content .= "ln $process_t/$sample.STR.vcf  $process_t/$sample.STR.unsort.vcf 
 	$content .="###filter_vcf\n";
 	$content .="python $Bin/share/lobSTR/scripts/lobSTR_filter_vcf.py --vcf $process_t/$sample.STR.vcf $filter > $process_t/$sample.STR.mark.vcf\n";
-	$content .="perl -lane \'print if /^#/; print if /PASS.+PASS/\'   $process_t/$sample.STR.mark.vcf > $process_t/$sample.STR.filter.vcf ";
+	$content .="perl -lane \'print if /^#/; print if /PASS.+PASS/\'   $process_t/$sample.STR.mark.vcf > $process_t/$sample.STR.filter.vcf \n";
+	$content .="perl -lane \'if (/^#/){print; next};next if \$F[4] eq \".\";print if \$F[3] ne \$F[4] \'$process_t/$sample.STR.filter.vcf  > $process_t/$sample.STR.filter.final.vcf";
 	AnaMethod::generateShell($lobSTR_sh,$content);
 	if (defined $dependent{$sample}) {
 		print TXT "$dependent{$sample}\t$build_index_sh:$qsubMemory[2]\n";
