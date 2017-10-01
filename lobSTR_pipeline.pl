@@ -70,7 +70,6 @@ $qsubMemory[3] ||= "1G";
 $pymonitor ||= "$Bin/bin/monitor";
 my ($shell, $process, $list)=("$outdir/shell/", "$outdir/process/", "$outdir/list");
 mkpath($shell);mkpath($process);mkpath($list);
-
 $env ||=" ";
 
 my ($bam,$dependent) = &ReadInfo2($input);
@@ -83,10 +82,10 @@ open TXT, ">$dependence" or die $!;
 
 ###step1 build_index
 foreach my $sample (keys %bam) {
+	
 	my $shell_t="$shell/$sample";
 	my $process_t="$process/$sample";
-	#my $list_t="$list/$sample";
-	mkpath($shell_t);mkpath($process_t);#mkpath($list_t);
+	mkpath($shell_t);mkpath($process_t);mkpath("$process_t/tmp");
 	my $content="$env";
 	
 	my $build_index_sh="$shell/build_index.sh";
@@ -106,7 +105,13 @@ foreach my $sample (keys %bam) {
 		print TXT "$lobSTR_sh:$qsubMemory[2]\n";
 	}
 	
+	#source env
 	$content="$env\n";
+	
+	$content .="export PERL5LIB=$Bin/lib/PERLLIB:\$PERL5LIB\n";
+	$content .="export R_LIBS=$Bin/lib/R_LIBS:\$R_LIBS\n";
+	$content .="export PATH=$Bin/bin:\$PATH\n";
+
 	$content .="###allelotype\n";
 	$content .="$Bin/bin/allelotype $allelotype_arg \\\n";   #allelotype arg
 	$content .="--bam $bam{$sample} \\\n";
@@ -114,11 +119,24 @@ foreach my $sample (keys %bam) {
 	$content .="--out $process_t/$sample.STR \\\n";
 	$content .="--strinfo $Bin/DB/database/GRCh38.p10.info.tab \\\n";
 	$content .="--index-prefix  $Bin/DB/database/GRCh38.p10.ref/lobSTR_\n";
-	$content .= "ln $process_t/$sample.STR.vcf  $process_t/$sample.STR.unsort.vcf 
+	$content .="if [ \$? -ne 0 ];then  echo ERRO:callstr ;exit 127 ;fi\n";
+
+
+	$content .="vcf-sort -c $process_t/$sample.STR.vcf -t $process_t/tmp > $process_t/$sample.STR.sort.vcf \n";
+	$content .="if [ \$? -ne 0 ];then  echo ERRO:vcf-sort ;exit 127 ;fi\n";
+	$content .="mv $process_t/$sample.STR.sort.vcf  $process_t/$sample.STR.vcf  \n";
+
+
 	$content .="###filter_vcf\n";
 	$content .="python $Bin/share/lobSTR/scripts/lobSTR_filter_vcf.py --vcf $process_t/$sample.STR.vcf $filter > $process_t/$sample.STR.mark.vcf\n";
 	$content .="perl -lane \'print if /^#/; print if /PASS.+PASS/\'   $process_t/$sample.STR.mark.vcf > $process_t/$sample.STR.filter.vcf \n";
-	$content .="perl -lane \'if (/^#/){print; next};next if \$F[4] eq \".\";print if \$F[3] ne \$F[4] \'$process_t/$sample.STR.filter.vcf  > $process_t/$sample.STR.filter.final.vcf";
+	$content .="perl -lane \'if (/^#/){print; next};next if \$F[4] eq \".\";print if \$F[3] ne \$F[4] \'$process_t/$sample.STR.filter.vcf  > $process_t/$sample.STR.filter.final.vcf\n";
+	$content .="###zbgip and tabxi\n";
+	$content .="bgzip $process_t/$sample.STR.vcf && tabix $process_t/$sample.STR.vcf.gz \n";
+	$content .="bgzip $process_t/$sample.STR.mark.vcf && tabix $process_t/$sample.STR.mark.vcf.gz";
+
+
+	
 	AnaMethod::generateShell($lobSTR_sh,$content);
 	if (defined $dependent{$sample}) {
 		print TXT "$dependent{$sample}\t$build_index_sh:$qsubMemory[2]\n";
